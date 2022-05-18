@@ -138,6 +138,46 @@ func resourceComputeInstance() *pluginsdk.Resource {
 				},
 			},
 
+			"setup_scripts": {
+				Type:     pluginsdk.TypeList,
+				Optional: true,
+				ForceNew: true,
+				MaxItems: 1,
+				Elem: &pluginsdk.Resource{
+					Schema: map[string]*pluginsdk.Schema{
+						"type": {
+							Type:     pluginsdk.TypeString,
+							Required: true,
+							ValidateFunc: validation.StringInSlice([]string{
+								"startup",
+								"creation",
+							}, false),
+						},
+
+						"script_source": {
+							Type:     pluginsdk.TypeString,
+							Required: true,
+						},
+
+						"script_data": {
+							Type:     pluginsdk.TypeString,
+							Required: true,
+						},
+
+						"script_arguments": {
+							Type:     pluginsdk.TypeString,
+							Optional: true,
+						},
+
+						"timeout": {
+							Type:     pluginsdk.TypeString,
+							Optional: true,
+							Default:  "15m",
+						},
+					},
+				},
+			},
+
 			"subnet_resource_id": {
 				Type:         pluginsdk.TypeString,
 				Optional:     true,
@@ -191,6 +231,7 @@ func resourceComputeInstanceCreate(d *pluginsdk.ResourceData, meta interface{}) 
 				SSHSettings:                      expandComputeSSHSetting(d.Get("ssh").([]interface{})),
 				ComputeInstanceAuthorizationType: machinelearningservices.ComputeInstanceAuthorizationType(d.Get("authorization_type").(string)),
 				PersonalComputeInstanceSettings:  expandComputePersonalComputeInstanceSetting(d.Get("assign_to_user").([]interface{})),
+				SetupScripts:                     expandSetupScripts(d.Get("setup_scripts").([]interface{})),
 			},
 			ComputeLocation:  utils.String(d.Get("location").(string)),
 			Description:      utils.String(d.Get("description").(string)),
@@ -263,6 +304,7 @@ func resourceComputeInstanceRead(d *pluginsdk.ResourceData, meta interface{}) er
 			}
 			d.Set("authorization_type", props.Properties.ComputeInstanceAuthorizationType)
 			d.Set("ssh", flattenComputeSSHSetting(props.Properties.SSHSettings))
+			d.Set("setup_scripts", flattenSetupScripts(props.Properties.SetupScripts))
 			d.Set("assign_to_user", flattenComputePersonalComputeInstanceSetting(props.Properties.PersonalComputeInstanceSettings))
 		}
 	} else {
@@ -318,6 +360,36 @@ func expandComputeSSHSetting(input []interface{}) *machinelearningservices.Compu
 	}
 }
 
+func expandSetupScripts(input []interface{}) *machinelearningservices.SetupScripts {
+	if len(input) == 0 {
+		return nil
+	}
+	value := input[0].(map[string]interface{})
+
+	setupScriptReference := &machinelearningservices.ScriptReference{
+		ScriptSource:    utils.String(value["script_source"].(string)),
+		ScriptData:      utils.String(value["script_data"].(string)),
+		ScriptArguments: utils.String(value["script_arguments"].(string)),
+		Timeout:         utils.String(value["timeout"].(string)),
+	}
+
+	setupScriptToExecute := &machinelearningservices.ScriptsToExecute{}
+
+	if *utils.String(value["type"].(string)) == "creation" {
+		setupScriptToExecute = &machinelearningservices.ScriptsToExecute{
+			CreationScript: setupScriptReference,
+		}
+	} else {
+		setupScriptToExecute = &machinelearningservices.ScriptsToExecute{
+			StartupScript: setupScriptReference,
+		}
+	}
+
+	return &machinelearningservices.SetupScripts{
+		Scripts: setupScriptToExecute,
+	}
+}
+
 func flattenComputePersonalComputeInstanceSetting(settings *machinelearningservices.PersonalComputeInstanceSettings) interface{} {
 	if settings == nil || settings.AssignedUser == nil {
 		return []interface{}{}
@@ -340,6 +412,35 @@ func flattenComputeSSHSetting(settings *machinelearningservices.ComputeInstanceS
 			"public_key": settings.AdminPublicKey,
 			"username":   settings.AdminUserName,
 			"port":       settings.SSHPort,
+		},
+	}
+}
+
+func flattenSetupScripts(settings *machinelearningservices.SetupScripts) interface{} {
+	if settings == nil {
+		return []interface{}{}
+	}
+	if settings.Scripts.StartupScript == nil {
+		// CreationScript
+		return []interface{}{
+			map[string]interface{}{
+				"type":             "creation",
+				"script_source":    settings.Scripts.CreationScript.ScriptSource,
+				"script_data":      settings.Scripts.CreationScript.ScriptData,
+				"script_arguments": settings.Scripts.CreationScript.ScriptArguments,
+				"timeout":          settings.Scripts.CreationScript.Timeout,
+			},
+		}
+	}
+
+	// StartupScript
+	return []interface{}{
+		map[string]interface{}{
+			"type":             "startup",
+			"script_source":    settings.Scripts.StartupScript.ScriptSource,
+			"script_data":      settings.Scripts.StartupScript.ScriptData,
+			"script_arguments": settings.Scripts.StartupScript.ScriptArguments,
+			"timeout":          settings.Scripts.StartupScript.Timeout,
 		},
 	}
 }
